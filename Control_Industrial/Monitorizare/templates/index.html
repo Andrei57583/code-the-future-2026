@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ro">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Monitor Industrial</title>
+        <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    </head>    
+    <body>
+        
+        <h1>Aici va fi monitorul</h1>
+        <hr>
+        <div id="monitor">--</div>
+        <script>
+            const socket = io();
+
+            socket.on('connect', () => {
+                console.log("Conectat la serverul local.")
+            })
+
+            socket.on('mqtt_update', function(msg) {
+                console.log("S-a primit prin Socket:", msg.valoare)
+                document.getElementById('monitor').innerHTML = '<p>' + msg.valoare + '</p>';
+            });
+
+            socket.on('connection_error', (err) => {
+                console.log("Eroare conexiune:", err);
+            })
+        </script>
+        <p>Aici o sa fie optiunile monitorului</p>
+    
+    </body>
+</html>
