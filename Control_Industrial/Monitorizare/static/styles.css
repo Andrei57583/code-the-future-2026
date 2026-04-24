@@ -3,6 +3,7 @@ body {
     flex-direction: column;
     justify-content: flex-start;
     margin:0;
+    background-image: url(background_img2.jpeg);
     background-color: white;
 }
 

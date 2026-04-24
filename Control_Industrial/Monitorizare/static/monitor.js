@@ -10,7 +10,7 @@ const myChart = new Chart(ctx, {
             label: 'Temperatura (C)',
             data: [], // Aici vor fi valorile(msg.data)
             borderColor: '#3498db',
-            backgroundColor: 'rgba(52, 152, 219, 0.2)',
+            backgroundColor: 'rgba(166, 241, 183, 0.84)',
             fill: true,
             tension: 0.4 // Face linia curbată (smooth)
         }]
@@ -20,13 +20,32 @@ const myChart = new Chart(ctx, {
         mantainAspectRatio: false,
         scales: {
             y:{
-                beginAtZero: false
+                beginAtZero: false,
+                grid: {
+                    color: '#ecf0f1'
+                },
+                ticks: {
+                    color: '#ecf0f1'
+                }
+            },
+            x:{
+                beginAtZero: false,
+                grid: {
+                    color: '#ecf0f1'
+                },
+                ticks: {
+                    color: '#ecf0f1'
+                }
             }
         },
         plugins: {
             legend: {
-                boxWidth: 10,
-                font: {size: 11}
+                labels: {
+                    boxWidth: 10,
+                    font: {size: 11},
+                    color: '#ecf0f1'
+                }
+                
             }
         }
     }
