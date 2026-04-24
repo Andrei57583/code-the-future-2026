@@ -11,16 +11,26 @@
     <body>
         
         <h1>Monitor</h1>
-        <div style="text-align:center; margin-bottom: 20px;">
+        
+        <div id="single-view" style="text-align:center; margin-bottom: 20px;">
             <label>Alege parametrul monitorizat: </label>
             <select id="sensor-select">
                 <option value="t">Temperatura (C)</option>
                 <option value="h">Umiditate (%)</option>
                 <option value="g">Nivel Gaz</option>
+                <option value="p">Presiune</option>
+                <option value="c">Curent (A)</option>
             </select>
         </div>
+        
+        <div style="width: 500px; height: 300px; margin: auto; border: 1px solid;">
             <canvas id="chart_monitor"></canvas>
         </div>
-        <script src="{{url_for('static', filename='monitor.js')}}"></script>    
+
+        <script src="{{url_for('static', filename='monitor.js')}}"></script>  
+        
+        <div id="risk" style="text-align: center;" class="square">
+            
+        </div>
     </body>
 </html>
