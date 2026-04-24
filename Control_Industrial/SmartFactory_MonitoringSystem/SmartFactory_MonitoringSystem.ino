@@ -43,47 +43,72 @@ float filteredGas = 0;
 float alpha = 0.08;
 float acsOffset = 0;
 
-// ---------------- WIFI + MQTT STARTUP ----------------
+String systemState = "SAFE";
+String cause = "NONE";
+
+// ---------------- CONNECT ----------------
 void connectSystem() {
 
-  Serial.println("\n[BOOT] Smart Factory System Starting...");
+  Serial.println("\n[BOOT] Industrial Safety System");
 
-  // ---------- WIFI ----------
-  Serial.println("[WIFI] Connecting...");
   WiFi.begin(ssid, password);
+  Serial.print("[WIFI] Connecting");
 
-  int wifiTry = 0;
-  while (WiFi.status() != WL_CONNECTED && wifiTry < 20) {
-    delay(500);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
     Serial.print(".");
-    wifiTry++;
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n[WIFI] Connected!");
-    Serial.print("[WIFI] IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\n[WIFI] FAILED!");
-  }
-
-  // ---------- MQTT ----------
-  Serial.println("[MQTT] Connecting...");
+  Serial.println("\n[WIFI] Connected");
 
   client.setServer(mqtt_server, mqtt_port);
 
-  int mqttTry = 0;
-  while (!client.connected() && mqttTry < 20) {
+  Serial.print("[MQTT] Connecting");
+  while (!client.connected()) {
     client.connect("ESP32_C6");
-    delay(500);
+    delay(300);
     Serial.print(".");
-    mqttTry++;
   }
 
-  if (client.connected()) {
-    Serial.println("\n[MQTT] Connected!");
-  } else {
-    Serial.println("\n[MQTT] FAILED (retry in loop)");
+  Serial.println("\n[MQTT] Connected");
+}
+
+// ---------------- APPLY STATE ----------------
+void applyState(String state) {
+
+  // RESET OUTPUTS
+  digitalWrite(LED_G, LOW);
+  digitalWrite(LED_Y, LOW);
+  digitalWrite(LED_R, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  if (state == "SAFE") {
+    digitalWrite(LED_G, HIGH);
+    digitalWrite(RELAY_PIN, LOW);   // FAN OFF
+    windowServo.write(0);
+  }
+
+  else if (state == "MODERATE") {
+    digitalWrite(LED_Y, HIGH);
+    digitalWrite(RELAY_PIN, HIGH);
+
+    // smooth opening
+    for (int pos = 0; pos <= 60; pos += 2) {
+      windowServo.write(pos);
+      delay(10);
+    }
+  }
+
+  else if (state == "CRITICAL") {
+    digitalWrite(LED_R, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
+    digitalWrite(RELAY_PIN, HIGH);
+
+    // fast opening
+    for (int pos = 0; pos <= 90; pos += 5) {
+      windowServo.write(pos);
+      delay(5);
+    }
   }
 }
 
@@ -107,15 +132,16 @@ void setup() {
 
   connectSystem();
 
-  delay(30000);
+  Serial.println("[SYSTEM] Calibration...");
+  delay(20000);
 
   // ACS calibration
   float sum = 0;
-  for (int i = 0; i < 300; i++) {
+  for (int i = 0; i < 200; i++) {
     sum += analogRead(ACS712_PIN);
     delay(2);
   }
-  acsOffset = (sum / 300.0) * (3.3 / 4095.0);
+  acsOffset = (sum / 200.0) * (3.3 / 4095.0);
 
   // GAS calibration
   sum = 0;
@@ -124,6 +150,8 @@ void setup() {
     delay(10);
   }
   R0 = sum / 100.0;
+
+  Serial.println("[SYSTEM] Ready");
 }
 
 // ---------------- LOOP ----------------
@@ -132,13 +160,10 @@ void loop() {
   if (!client.connected()) client.connect("ESP32_C6");
   client.loop();
 
+  // ---------- READ ----------
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
-
-  if (isnan(temp) || isnan(hum)) return;
-
   float pressure = bmp.readPressure() / 100.0;
-  if (pressure < 300 || pressure > 1200) pressure = 0;
 
   int rawGas = analogRead(MQ135_PIN);
   filteredGas = alpha * rawGas + (1 - alpha) * filteredGas;
@@ -146,57 +171,79 @@ void loop() {
 
   float voltage = analogRead(ACS712_PIN) * (3.3 / 4095.0);
   float current = (voltage - acsOffset) / 0.185;
-  if (abs(current) < 0.08) current = 0;
+  if (abs(current) < 0.1) current = 0;
 
-  // ---------------- RISK ----------------
-  const char* risk;
+  if (pressure < 300 || pressure > 1200) pressure = 0;
 
-  if (gas < 80) risk = "SAFE";
-  else if (gas < 140) risk = "MODERATE";
-  else risk = "CRITICAL";
+  // ---------- CONDITIONS ----------
+  bool gasMod = gas > 80;
+  bool gasCrit = gas > 140;
 
-  // ---------------- RESET LEDs ----------------
-  digitalWrite(LED_G, LOW);
-  digitalWrite(LED_Y, LOW);
-  digitalWrite(LED_R, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
+  bool tempMod = temp > 30;
+  bool tempCrit = temp > 35;
 
-  bool fan = false;
-  bool window = false;
+  bool humMod = hum > 70;
+  bool humCrit = hum > 85;
 
-  if (strcmp(risk, "SAFE") == 0) {
-    digitalWrite(LED_G, HIGH);
+  bool currMod = current > 5;
+  bool currCrit = current > 10;
+
+  bool presMod = pressure > 1020 || pressure < 940;
+  bool presCrit = pressure > 1050 || pressure < 900;
+
+  // ---------- BUILD CAUSE (NO DUPLICATES) ----------
+  cause = "";
+
+  if (gasCrit) cause += "GAS_CRIT ";
+  else if (gasMod) cause += "GAS_MOD ";
+
+  if (tempCrit) cause += "TEMP_CRIT ";
+  else if (tempMod) cause += "TEMP_MOD ";
+
+  if (humCrit) cause += "HUM_CRIT ";
+  else if (humMod) cause += "HUM_MOD ";
+
+  if (currCrit) cause += "CURR_CRIT ";
+  else if (currMod) cause += "CURR_MOD ";
+
+  if (presCrit) cause += "PRESS_CRIT ";
+  else if (presMod) cause += "PRESS_MOD ";
+
+  if (cause == "") cause = "NONE";
+
+  // ---------- STATE ----------
+  bool critical = gasCrit || tempCrit || humCrit || currCrit || presCrit;
+  bool moderate = gasMod || tempMod || humMod || currMod || presMod;
+
+  String newState;
+
+  if (critical) newState = "CRITICAL";
+  else if (moderate) newState = "MODERATE";
+  else newState = "SAFE";
+
+  // ---------- APPLY ----------
+  if (newState != systemState) {
+    systemState = newState;
+    applyState(systemState);
   }
-  else if (strcmp(risk, "MODERATE") == 0) {
-    digitalWrite(LED_Y, HIGH);
-    fan = true;
-    window = true;
-  }
-  else {
-    digitalWrite(LED_R, HIGH);
-    digitalWrite(BUZZER_PIN, HIGH);
-    fan = true;
-    window = true;
-  }
 
-  digitalWrite(RELAY_PIN, fan ? HIGH : LOW);
-  windowServo.write(window ? 90 : 0);
+  // ---------- SERIAL ----------
+  Serial.println("\n========== INDUSTRIAL MONITOR ==========");
+  Serial.printf("Temperature : %.2f °C\n", temp);
+  Serial.printf("Humidity    : %.2f %%\n", hum);
+  Serial.printf("Pressure    : %.2f hPa\n", pressure);
+  Serial.printf("Gas Index   : %.2f\n", gas);
+  Serial.printf("Current     : %.2f A\n", current);
+  Serial.printf("STATE       : %s\n", systemState.c_str());
+  Serial.printf("CAUSE       : %s\n", cause.c_str());
+  Serial.println("=======================================");
 
-  // ---------------- SERIAL ----------------
-  Serial.println("\n========== SYSTEM STATUS ==========");
-  Serial.printf("Temp: %.2f °C\n", temp);
-  Serial.printf("Hum: %.2f %%\n", hum);
-  Serial.printf("Pressure: %.2f hPa\n", pressure);
-  Serial.printf("Gas: %.2f\n", gas);
-  Serial.printf("Current: %.2f A\n", current);
-  Serial.printf("Status: %s\n", risk);
-  Serial.println("==================================");
-
-  // ---------------- MQTT ----------------
+  // ---------- MQTT ----------
   char payload[256];
   snprintf(payload, sizeof(payload),
-    "{\"t\":%.2f,\"h\":%.2f,\"p\":%.2f,\"g\":%.2f,\"c\":%.2f,\"r\":\"%s\"}",
-    temp, hum, pressure, gas, current, risk);
+    "{\"t\":%.2f,\"h\":%.2f,\"p\":%.2f,\"g\":%.2f,\"c\":%.2f,\"r\":\"%s\",\"cause\":\"%s\"}",
+    temp, hum, pressure, gas, current, systemState.c_str(), cause.c_str()
+  );
 
   client.publish(mqtt_topic, payload);
 
